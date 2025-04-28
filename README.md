@@ -1,70 +1,304 @@
-# Getting Started with Create React App
+# App Selector Extension Guide
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+This guide explains how to extend and customize the App Selector component in your React application.
 
-## Available Scripts
+## Where to Find the Files
 
-In the project directory, you can run:
+The main files for the App Selector are located in:
 
-### `npm start`
+```
+src/
+  └── components/
+      └── AppSelector/
+          ├── AppSelectorCarousel.js  // Main component logic
+          └── AppSelectorCarousel.css // Styling
+```
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Adding New Applications to the Selector
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+To add new applications to the selector, update the `demoComponents` array in `src/App.js`:
 
-### `npm test`
+```javascript
+// In App.js
+const demoComponents = [
+  { 
+    name: 'Teams Hub', 
+    component: <TeamsHub />,
+    icon: '👥'
+  },
+  { 
+    name: 'AD Viewer', 
+    component: <ActiveDirectoryQuery />,
+    icon: '🔍' 
+  },
+  // Add your new component here:
+  { 
+    name: 'Your New App', 
+    component: <YourNewComponent />,
+    icon: '🚀' // Choose an appropriate emoji or use a Lucide icon
+  },
+];
+```
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## Customizing the Appearance
 
-### `npm run build`
+### Changing Colors and Theme
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+To modify the color scheme, edit the CSS variables in `AppSelectorCarousel.css`:
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```css
+/* At the top of AppSelectorCarousel.css, add: */
+:root {
+  --sidebar-bg: #282c34;
+  --sidebar-highlight: #61dafb;
+  --sidebar-text: white;
+  --header-bg: white;
+  --content-bg: #f5f5f7;
+}
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+/* Then reference these variables throughout the CSS file */
+.app-selector-sidebar {
+  background-color: var(--sidebar-bg);
+  color: var(--sidebar-text);
+}
+```
 
-### `npm run eject`
+### Adjusting Layout and Sizes
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+To change the sidebar width:
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```css
+/* In AppSelectorCarousel.css */
+.app-selector-sidebar {
+  width: 280px; /* Default is 250px */
+}
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+To modify the header height:
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```css
+.app-selector-header {
+  padding: 20px 25px; /* Increase or decrease padding */
+}
+```
 
-## Learn More
+## Adding Features
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+### Adding a Search Feature
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+To add a search feature to filter applications, modify `AppSelectorCarousel.js`:
 
-### Code Splitting
+```javascript
+// Add to the imports
+import { Search } from 'lucide-react';
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+// Add a search state
+const [searchTerm, setSearchTerm] = useState('');
 
-### Analyzing the Bundle Size
+// Add a search input in the sidebar
+<div className="app-selector-search">
+  <div className="search-input-wrapper">
+    <Search size={16} />
+    <input 
+      type="text" 
+      placeholder="Search apps..." 
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+    />
+  </div>
+</div>
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+// Filter components based on search
+const filteredComponents = components.filter(comp => 
+  comp.name.toLowerCase().includes(searchTerm.toLowerCase())
+);
 
-### Making a Progressive Web App
+// Use filteredComponents instead of components when mapping
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+### Adding Keyboard Navigation
 
-### Advanced Configuration
+To add keyboard navigation:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+```javascript
+// Add to AppSelectorCarousel.js
+useEffect(() => {
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowRight') {
+      next();
+    } else if (e.key === 'ArrowLeft') {
+      prev();
+    }
+  };
+  
+  window.addEventListener('keydown', handleKeyDown);
+  return () => window.removeEventListener('keydown', handleKeyDown);
+}, [next, prev]);
+```
 
-### Deployment
+### Adding a Grid View
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+To implement a grid view toggle:
 
-### `npm run build` fails to minify
+1. Add a state for the view mode:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```javascript
+const [viewMode, setViewMode] = useState('single'); // 'single' or 'grid'
+```
+
+2. Add a toggle button in the header:
+
+```javascript
+<button 
+  className="app-selector-grid-button"
+  onClick={() => setViewMode(viewMode === 'single' ? 'grid' : 'single')}
+>
+  {viewMode === 'single' ? <Grid size={18} /> : <Maximize size={18} />}
+</button>
+```
+
+3. Modify the content area to show either a single component or a grid:
+
+```javascript
+<div className={`app-selector-content ${viewMode === 'grid' ? 'grid-view' : ''}`}>
+  {viewMode === 'single' ? (
+    components[currentIndex].component
+  ) : (
+    <div className="app-selector-grid">
+      {components.map((comp, index) => (
+        <div 
+          key={index} 
+          className="app-selector-grid-item"
+          onClick={() => {
+            setCurrentIndex(index);
+            setViewMode('single');
+          }}
+        >
+          <div className="grid-item-icon">{comp.icon}</div>
+          <div className="grid-item-name">{comp.name}</div>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+4. Add CSS for the grid view:
+
+```css
+.app-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px;
+  padding: 20px;
+}
+
+.app-selector-grid-item {
+  background-color: white;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.app-selector-grid-item:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.grid-item-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+}
+
+.grid-item-name {
+  font-weight: 500;
+}
+```
+
+## Advanced Customization
+
+### Custom Transitions
+
+To add custom transitions between applications:
+
+```css
+/* In AppSelectorCarousel.css */
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.app-selector-content > * {
+  animation: slideInFromRight 0.3s ease-out;
+}
+```
+
+### Adding App Badges or Notifications
+
+To add notification badges to apps in the sidebar:
+
+```javascript
+// Update your demoComponents array in App.js:
+const demoComponents = [
+  { 
+    name: 'Teams Hub', 
+    component: <TeamsHub />,
+    icon: '👥',
+    notifications: 3  // Number of notifications
+  },
+  // ...
+];
+
+// In AppSelectorCarousel.js, update the nav item rendering:
+<div className="app-selector-nav-item">
+  <span className="app-selector-nav-icon">
+    {comp.icon}
+    {comp.notifications > 0 && (
+      <span className="notification-badge">{comp.notifications}</span>
+    )}
+  </span>
+  <span className="app-selector-nav-text">{comp.name}</span>
+</div>
+```
+
+```css
+/* Add this to AppSelectorCarousel.css */
+.app-selector-nav-icon {
+  position: relative;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background-color: #f44336;
+  color: white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+```
+
+## Troubleshooting
+
+If you encounter issues with the app selector:
+
+1. Check that all dependencies are installed (specifically Lucide React)
+2. Verify that the component paths in your imports are correct
+3. Check for any CSS conflicts with your existing styles
+4. Inspect the console for any JavaScript errors
+
+For additional help or feature requests, please contact the development team.

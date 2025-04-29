@@ -535,19 +535,23 @@ def get_ad_page(
         result = execute_powershell(pagination_command)
         # Parse JSON result
         parsed = json.loads(result)
-        
+    
         # Handle different result formats
         if isinstance(parsed, dict):
             items = parsed.get('Items', [])
-            if isinstance(items, dict):
-                items = [items]
+            if items is None:
+                items = []
+            elif isinstance(items, dict):
+                items = [items]  # Convert single item to array
             cookie = parsed.get('Cookie', '')
             has_more = parsed.get('HasMoreResults', False)
-            
+        
             all_results.extend(items or [])
             next_cookie = cookie if has_more else None
         else:
-            # Unexpected format
+            # Unexpected format - log more info for debugging
+            print(f"Unexpected result format: {type(parsed)}")
+            print(f"Result content: {parsed}")
             raise HTTPException(status_code=500, detail="Unexpected result format from PowerShell")
     
     except json.JSONDecodeError as e:

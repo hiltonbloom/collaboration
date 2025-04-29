@@ -126,12 +126,46 @@ This implementation has several security considerations:
 
 4. **Error Handling**: Enhance error handling to avoid exposing sensitive information in error messages.
 
-## Next Steps
 
-Once your basic implementation is working, consider these enhancements:
+## Finding Machines and Users by Name or Distinguished Name
 
-1. Add pagination on the server side for large result sets
-2. Implement caching to improve performance
-3. Add more advanced filtering options
-4. Add support for creating, updating, or deleting AD objects (with appropriate permissions)
-5. Implement user authentication and role-based access control
+The Active Directory Query Tool allows you to search for objects based on various criteria. Here are some common search patterns:
+
+### Finding Machines by Name
+
+1. **To find a machine by its hostname:**
+   - Select "Computers" in the Filter Type dropdown
+   - Enter the hostname (e.g., "BUMC-PC934122") in the Search Query field
+   - Click "Search Active Directory"
+
+2. **To find machines by partial name:**
+   - Select "Computers" in the Filter Type dropdown
+   - Enter part of the name (e.g., "BUMC" to find all machines with BUMC in their name)
+   - Click "Search Active Directory"
+
+### Finding Machines by OU or Department
+
+1. **To search within a specific OU:**
+   - Click "Add OU" and enter the OU path
+   - For example: `OU=BUMC-Imaged,OU=BUMC,DC=ad,DC=bu,DC=edu`
+   - Click "Search Active Directory" to see all machines in that OU
+
+2. **Filtering Windows 10 machines by OU:**
+   - Select "Computers" in the Filter Type dropdown
+   - Enter "Windows 10" in the Search Query field
+   - Add the OU path as described above
+   - Click "Search Active Directory"
+
+### Finding Users by Department
+
+1. **To find all users in a department:**
+   - Select "Users" in the Filter Type dropdown
+   - Add the department's OU path (e.g., `OU=BUMC,DC=ad,DC=bu,DC=edu`)
+   - Click "Search Active Directory"
+
+### Notes
+
+- The tool searches for partial matches by default
+- To ensure the Distinguished Name is returned in results, make sure "DistinguishedName" is selected in the "Columns to Display" section
+- For faster searches, narrow your scope by specifying relevant OUs
+- You can export results to CSV for further analysis

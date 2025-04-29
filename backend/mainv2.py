@@ -1,13 +1,13 @@
 import base64
+from datetime import datetime
 import os
 import json
 import uuid
-import asyncio
+import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Query, Path
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ldap3 import Server, Connection, ALL, SUBTREE
-import aioredis
 
 # --- Configuration ---
 LDAP_URL = os.getenv('LDAP_URL', 'ldap://dc.example.com')
@@ -22,7 +22,7 @@ app = FastAPI(title="AD Query with Efficient Pagination")
 @app.on_event("startup")
 async def startup():
     # Redis pool
-    app.state.redis = await aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
+    app.state.redis = redis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
 
     # LDAP connection
     server = Server(LDAP_URL, get_info=ALL)
@@ -74,6 +74,11 @@ async def ldap_page(ou: str | None, filter_cond: str, attrs: list[str], page_siz
     return entries, cookie_out, has_more
 
 # --- Endpoints ---
+@app.get("/api/health")
+def health_check():
+    """API Health Check"""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
 @app.post("/api/ad/query", response_model=PaginatedResponse)
 async def start_query(req: ADQueryRequest):
     # Validate filter

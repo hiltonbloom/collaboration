@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 import os
 import json
 import uuid
-import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Query, Path, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -14,6 +13,10 @@ import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from redis.asyncio import Redis
+
 
 # --- Configuration ---
 # Default LDAP server
@@ -30,17 +33,34 @@ LDAP_SERVER = os.getenv('LDAP_SERVER', DEFAULT_LDAP_SERVER)
 LDAP_URL = format_ldap_url(LDAP_SERVER)
 LDAP_USER = os.getenv('LDAP_USER', '')
 LDAP_PASS = os.getenv('LDAP_PASS', '')
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost')
 SERVER_SECRET_KEY = os.getenv('AD_AUTH_SECRET_KEY', secrets.token_hex(32))
 SALT = os.getenv('AD_AUTH_SALT', secrets.token_hex(16)).encode()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Redis pool
+    app.state.redis = Redis(host="localhost", encoding="utf-8", port=6379, decode_responses=True)
+    
+    # LDAP connection
+    server = Server(app_config["ldap_url"], get_info=ALL)
+    conn = Connection(server, user=LDAP_USER, password=LDAP_PASS, auto_bind=True)
+    app.state.ldap = conn
+    
+    yield
+    # close connections
+    await app.state.redis.close()
+    app.state.ldap.unbind()
+
 # --- FastAPI App ---
-app = FastAPI(title="AD Query with Efficient Pagination and Authentication")
+app = FastAPI(
+    title="AD Query with Efficient Pagination and Authentication",
+    lifespan=lifespan
+)
 
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React app's address
+    allow_origins=["http://localhost:3000", "http://localhost:5000", ],  # React app's address
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,22 +72,6 @@ app_config = {
     "ldap_server": LDAP_SERVER,
     "ldap_url": LDAP_URL
 }
-
-# --- Redis & LDAP connections ---
-@app.on_event("startup")
-async def startup():
-    # Redis pool
-    app.state.redis = redis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
-
-    # LDAP connection
-    server = Server(app_config["ldap_url"], get_info=ALL)
-    conn = Connection(server, user=LDAP_USER, password=LDAP_PASS, auto_bind=True)
-    app.state.ldap = conn
-
-@app.on_event("shutdown")
-async def shutdown():
-    await app.state.redis.close()
-    app.state.ldap.unbind()
 
 # --- Pydantic models ---
 class ADQueryRequest(BaseModel):
@@ -98,6 +102,7 @@ class AuthResponse(BaseModel):
     success: bool
     message: str
     user_info: Dict[str, Any] | None = None
+    token: Dict[str, Any] | None = None
 
 class ExportRequest(BaseModel):
     session_id: str
@@ -287,11 +292,94 @@ async def export_to_json(session_id: str, selected_ids: List[str] = None):
     
     return json.dumps(all_results, indent=2)
 
+# --- Session Management ---
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import uuid
+import time
+from typing import Optional
+
+# Security scheme
+security = HTTPBearer()
+
+# Session management
+async def create_session(user_info: dict) -> str:
+    session_id = str(uuid.uuid4())
+    session_data = {
+        "user_info": json.dumps(user_info),
+        "created_at": time.time(),
+        "expires_at": time.time() + 3600  # 1 hour expiry
+    }
+    
+    # Store in Redis
+    session_key = f"user_session:{session_id}"
+    await app.state.redis.hset(session_key, mapping=session_data)
+    await app.state.redis.expire(session_key, 3600)  # 1 hour TTL
+    
+    return session_id
+
+async def validate_session(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    session_id = credentials.credentials
+    session_key = f"user_session:{session_id}"
+    
+    # Check if session exists
+    exists = await app.state.redis.exists(session_key)
+    if not exists:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session"
+        )
+    
+    # Get session data
+    session_data = await app.state.redis.hgetall(session_key)
+    
+    # Check if session expired
+    if float(session_data.get("expires_at", 0)) < time.time():
+        await app.state.redis.delete(session_key)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired"
+        )
+    
+    # Refresh session TTL
+    await app.state.redis.expire(session_key, 3600)
+    
+    # Update expiry time
+    new_expires = time.time() + 3600
+    await app.state.redis.hset(session_key, "expires_at", new_expires)
+    
+    # Return user info
+    return json.loads(session_data.get("user_info", "{}"))
+
 # --- Endpoints ---
 @app.get("/api/health")
 def health_check():
     """API Health Check"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+@app.post("/api/auth/refresh")
+async def refresh_session(current_user: dict = Depends(validate_session)):
+    """Refresh the user's session"""
+    # Session is already refreshed in the validate_session dependency
+    return {
+        "success": True,
+        "message": "Session refreshed successfully",
+        "user_info": current_user
+    }
+
+@app.post("/api/auth/logout")
+async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Invalidate the user's session"""
+    session_id = credentials.credentials
+    session_key = f"user_session:{session_id}"
+    
+    # Delete the session
+    await app.state.redis.delete(session_key)
+    
+    return {
+        "success": True,
+        "message": "Logged out successfully"
+    }
 
 @app.get("/api/ad/attributes/{object_type}")
 async def get_attributes(object_type: str):
@@ -309,7 +397,8 @@ async def get_attributes(object_type: str):
     return {"attributes": DEFAULT_ATTRIBUTES[object_type]}
 
 @app.post("/api/ad/query", response_model=PaginatedResponse)
-async def start_query(req: ADQueryRequest):
+async def start_query(req: ADQueryRequest,
+                      user_info: dict = Depends(validate_session)):
     # Validate filter
     if req.filter not in {'computers', 'users', 'groups'}:
         raise HTTPException(400, "Invalid filter type")
@@ -580,18 +669,21 @@ async def export_results(
 async def verify_credentials(auth_request: AuthRequest):
     """Verify AD credentials and return user info if valid"""
     try:
-        # Directly use the password sent in the request (already secure due to HTTPS)
         success, user_info = authenticate_with_ad(
             auth_request.username,
-            auth_request.password,  # No need to decrypt
+            auth_request.password,
             auth_request.domain
         )
 
         if success:
+            # Create a session
+            session_id = await create_session(user_info)
+            
             return {
                 "success": True,
                 "message": "Authentication successful",
-                "user_info": user_info
+                "user_info": user_info,
+                "token": session_id  # Return token to client
             }
         return {
             "success": False,
@@ -600,7 +692,7 @@ async def verify_credentials(auth_request: AuthRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail="Authentication error")
-
+    
 @app.post("/api/auth/test-connection")
 async def test_connection(credentials: AuthRequest):
     """Test AD connection with the provided credentials"""

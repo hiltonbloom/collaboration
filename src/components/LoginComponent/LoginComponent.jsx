@@ -28,6 +28,7 @@ export const AuthProvider = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [token, setToken] = useState(null);
 
     // Check for existing session on component mount
     useEffect(() => {
@@ -51,11 +52,19 @@ export const AuthProvider = ({ children }) => {
         checkSession();
     }, []);
 
-    // Login function - UPDATED to use /api/auth/verify instead of /api/auth/login
+    useEffect(() => {
+        if (isAuthenticated) {
+            // Refresh every 30 minutes
+            const refreshInterval = setInterval(() => {
+                refreshSession();
+            }, 30 * 60 * 1000);
+            
+            return () => clearInterval(refreshInterval);
+        }
+    }, [isAuthenticated]);
+
     const login = async (username, password, domain) => {
         try {
-
-            // Send login request to backend using /api/auth/verify endpoint
             const response = await fetch('http://localhost:8000/api/auth/verify', {
                 method: 'POST',
                 headers: {
@@ -67,52 +76,65 @@ export const AuthProvider = ({ children }) => {
                     domain,
                 })
             });
-
+    
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.detail || 'Login failed');
             }
-
+    
             const data = await response.json();
-
+    
             if (!data.success) {
                 throw new Error(data.message || 'Authentication failed');
             }
-
-            // Store the session data securely
+    
+            // Store the token and user info
             localStorage.setItem('adauth_session', JSON.stringify({
-                user: data.user_info
+                user: data.user_info,
+                token: data.token
             }));
-
+    
             // Update state
             setIsAuthenticated(true);
             setUser(data.user_info);
-
+            setToken(data.token);
+    
             return { success: true };
         } catch (error) {
             console.error('Login error:', error);
             return {
                 success: false,
-                message: error.message || 'Authentication failed. Please check your credentials and try again.'
+                message: error.message || 'Authentication failed.'
             };
         }
     };
 
-    // Logout function
     const logout = async () => {
-        // Clear local session data
-        localStorage.removeItem('adauth_session');
-        setIsAuthenticated(false);
-        setUser(null);
+        try {
+            // Call logout endpoint
+            await fetch('http://localhost:8000/api/auth/logout', {
+                method: 'POST',
+                headers: getAuthHeader()
+            });
+        } catch (error) {
+            console.error('Logout error:', error);
+        } finally {
+            // Clear local session data
+            localStorage.removeItem('adauth_session');
+            setIsAuthenticated(false);
+            setUser(null);
+            setToken(null);
+        }
     };
 
     // Get auth header for API requests
     const getAuthHeader = () => {
         const storedSession = localStorage.getItem('adauth_session');
         if (!storedSession) return {};
-
+        
+        const parsedSession = JSON.parse(storedSession);
         return {
-            'Authorization': `Bearer ${JSON.parse(storedSession).token || ""}`
+            'Authorization': `Bearer ${parsedSession.token || ""}`
         };
     };
 
@@ -174,6 +196,29 @@ export const AuthProvider = ({ children }) => {
                 success: false,
                 message: error.message || 'Failed to configure LDAP server'
             };
+        }
+    };
+
+    const refreshSession = async () => {
+        try {
+            const response = await fetch('http://localhost:8000/api/auth/refresh', {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeader(),
+                    'Content-Type': 'application/json'
+                }
+            });
+    
+            if (!response.ok) {
+                // Token is invalid, log the user out
+                logout();
+                return false;
+            }
+    
+            return true;
+        } catch (error) {
+            console.error('Session refresh error:', error);
+            return false;
         }
     };
 

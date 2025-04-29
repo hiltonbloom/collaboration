@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query, Path, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from ldap3 import Server, Connection, ALL, SUBTREE, NTLM
+from ldap3 import Server, Connection, ALL, SUBTREE, NTLM, SIMPLE
 from typing import List, Optional, Dict, Any, Union
 import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -89,7 +89,7 @@ class PaginatedResponse(BaseModel):
 class AuthRequest(BaseModel):
     username: str
     domain: str
-    encrypted_credential: str
+    password: str
     
 class LdapServerConfig(BaseModel):
     server_name: str
@@ -135,14 +135,16 @@ def decrypt_password(encrypted_data: str, server_key: str) -> str:
 def authenticate_with_ad(username: str, password: str, domain: str):
     """Authenticate a user against Active Directory"""
     try:
-        server_address = domain
-        server = Server(server_address, get_info=ALL)
+        server = Server(domain)
         conn = Connection(
-            server,
-            user=f"{domain}\\{username}",
+            server=server,
+            user=f"{username}@{domain}", # SIMPLE pattern; NTLM should use user=
+#           user=f"{domain}\\{username}", Use this instead of the above if auth=NTLM instead of SIMPLE
             password=password,
-            authentication=NTLM,
-            auto_bind=True
+            authentication=SIMPLE,
+            auto_bind=True,
+            check_names=False,
+            raise_exceptions=False
         )
         user_info = get_user_info(conn, username, domain)
         conn.unbind()
@@ -151,33 +153,38 @@ def authenticate_with_ad(username: str, password: str, domain: str):
         print(f"AD authentication error: {str(e)}")
         return False, None
 
-def get_user_info(conn, username, domain):
+def get_user_info(conn:Connection, username, domain):
     """Get user information from Active Directory"""
     domain_parts = domain.split('.')
     search_base = ','.join([f"DC={part}" for part in domain_parts])
-    conn.search(
-        search_base=search_base,
-        search_filter=f"(&(objectClass=user)(sAMAccountName={username}))",
-        attributes=['distinguishedName', 'memberOf', 'mail', 'displayName', 'department', 'title']
-    )
-    
-    if len(conn.entries) > 0:
-        user_entry = conn.entries[0]
-        groups = [dn.split(',')[0].replace('CN=', '') for dn in user_entry.memberOf] if hasattr(user_entry, 'memberOf') else []
+    try:
+            
+        conn.search(
+            search_base=search_base,
+            search_filter=f"(&(objectClass=user)(sAMAccountName={username}))",
+            attributes=['distinguishedName', 'memberOf', 'mail', 'displayName', 'department', 'title']
+        )
+        
+        if len(conn.entries) > 0:
+            user_entry = conn.entries[0]
+            groups = [dn.split(',')[0].replace('CN=', '') for dn in user_entry.memberOf] if hasattr(user_entry, 'memberOf') else []
+            return {
+                'username': username,
+                'distinguishedName': user_entry.distinguishedName.value if hasattr(user_entry, 'distinguishedName') else None,
+                'displayName': user_entry.displayName.value if hasattr(user_entry, 'displayName') else username,
+                'email': user_entry.mail.value if hasattr(user_entry, 'mail') else None,
+                'department': user_entry.department.value if hasattr(user_entry, 'department') else None,
+                'title': user_entry.title.value if hasattr(user_entry, 'title') else None,
+                'groups': groups
+            }
         return {
             'username': username,
-            'distinguishedName': user_entry.distinguishedName.value if hasattr(user_entry, 'distinguishedName') else None,
-            'displayName': user_entry.displayName.value if hasattr(user_entry, 'displayName') else username,
-            'email': user_entry.mail.value if hasattr(user_entry, 'mail') else None,
-            'department': user_entry.department.value if hasattr(user_entry, 'department') else None,
-            'title': user_entry.title.value if hasattr(user_entry, 'title') else None,
-            'groups': groups
+            'distinguishedName': None,
+            'groups': []
         }
-    return {
-        'username': username,
-        'distinguishedName': None,
-        'groups': []
-    }
+    except Exception as e:
+        print(f"ERROR attempting to get_user_info: {str(e)}")
+        raise
 
 # --- Helpers ---
 async def get_session_key(session_id: str) -> str:
@@ -573,10 +580,13 @@ async def export_results(
 async def verify_credentials(auth_request: AuthRequest):
     """Verify AD credentials and return user info if valid"""
     try:
-        password = decrypt_password(auth_request.encrypted_credential, SERVER_SECRET_KEY)
+        # Directly use the password sent in the request (already secure due to HTTPS)
         success, user_info = authenticate_with_ad(
-            auth_request.username, password, auth_request.domain
+            auth_request.username,
+            auth_request.password,  # No need to decrypt
+            auth_request.domain
         )
+
         if success:
             return {
                 "success": True,
@@ -589,14 +599,13 @@ async def verify_credentials(auth_request: AuthRequest):
             "user_info": None
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Authentication error")
 
 @app.post("/api/auth/test-connection")
 async def test_connection(credentials: AuthRequest):
     """Test AD connection with the provided credentials"""
     try:
-        password = decrypt_password(credentials.encrypted_credential, SERVER_SECRET_KEY)
-        success, _ = authenticate_with_ad(credentials.username, password, credentials.domain)
+        success, _ = authenticate_with_ad(credentials.username, credentials.password, credentials.domain)
         return {
             "connected": success,
             "message": "Connection successful" if success else "Connection failed"

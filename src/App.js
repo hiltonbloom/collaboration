@@ -1,13 +1,16 @@
+// src/App.js
 import React from 'react';
 import './App.css';
-// Import the new AppSelectorCarousel instead of the old Carousel
 import AppSelectorCarousel from './components/AppSelectorCarousel/AppSelectorCarousel';
-
-// Import your demo components
 import TeamsHub from './components/TeamsHub/TeamsHub.jsx';
 import ActiveDirectoryQuery from './components/ActiveDirectoryQuery/ActiveDirectoryQuery.jsx';
+import LoginComponent, { AuthProvider, useAuth } from './components/LoginComponent/LoginComponent';
+import { UserCircle, LogOut } from 'lucide-react';
 
-function App() {
+// Authenticated App wrapper - only shows content when logged in
+const AuthenticatedApp = () => {
+  const { currentUser, signOut } = useAuth();
+
   // Enhanced demo components with icons
   const demoComponents = [
     { 
@@ -23,10 +26,43 @@ function App() {
     // Add more demos here
   ];
 
+  // If not authenticated, show login screen
+  if (!currentUser) {
+    return <LoginComponent />;
+  }
+
+  // Show the app with authenticated user info
   return (
     <div className="App">
+      {/* Authenticated user bar */}
+      <div className="auth-user-bar">
+        <div className="auth-user-info">
+          <div className="auth-user-avatar">
+            <UserCircle size={20} />
+          </div>
+          <div className="auth-user-details">
+            <div className="auth-user-name">{currentUser.username}</div>
+            <div className="auth-user-domain">{currentUser.domain}</div>
+          </div>
+        </div>
+        <button className="auth-logout-button" onClick={signOut}>
+          <LogOut size={16} />
+          <span>Sign Out</span>
+        </button>
+      </div>
+      
+      {/* Main app content */}
       <AppSelectorCarousel components={demoComponents} />
     </div>
+  );
+};
+
+// Main App component with Auth Provider
+function App() {
+  return (
+    <AuthProvider>
+      <AuthenticatedApp />
+    </AuthProvider>
   );
 }
 

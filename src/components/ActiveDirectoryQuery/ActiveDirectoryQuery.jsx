@@ -1,22 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Plus, X, Download, ArrowLeft, ArrowRight, RefreshCw, Save, Database, Check, CheckSquare, Square } from 'lucide-react';
 import './ActiveDirectoryQuery.css';
 import apiService from '../../services/api.ts';
 
 const ActiveDirectoryQuery = () => {
+  // Search parameters
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalResults, setTotalResults] = useState(0);
-  const [detailView, setDetailView] = useState(null);
+  const [filter, setFilter] = useState("computers");
   const [availableAttributes, setAvailableAttributes] = useState([]);
   const [selectedColumns, setSelectedColumns] = useState([]);
-  const [filter, setFilter] = useState("computers");
+  const [ouPaths, setOuPaths] = useState([]);
+  const [newOuPath, setNewOuPath] = useState("");
+  const [showOuInput, setShowOuInput] = useState(false);
+  const [pageSize, setPageSize] = useState(25); // Default page size
+  
+  // UI states
+  const [loading, setLoading] = useState(false);
+  const [initialLoad, setInitialLoad] = useState(true);
   const [error, setError] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState(null);
+  const [detailView, setDetailView] = useState(null);
   
-  const itemsPerPage = 5;
+  // Pagination and results
+  const [results, setResults] = useState([]);
+  const [totalResults, setTotalResults] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [isCountExact, setIsCountExact] = useState(true);
+  
+  // Additional features
+  const [selectedItems, setSelectedItems] = useState({});
+  const [selectAll, setSelectAll] = useState(false);
+  const [loadingAllResults, setLoadingAllResults] = useState(false);
+  const [allResultsProgress, setAllResultsProgress] = useState(0);
   
   // Check API connection on component mount
   useEffect(() => {
@@ -54,43 +72,33 @@ const ActiveDirectoryQuery = () => {
     }
   };
   
-  useEffect(() => {
-    // Initial query to load data when the component mounts and attributes are loaded
-    if (availableAttributes.length > 0) {
-      debugger;
-      handleSearch();
-    }
-  }, [availableAttributes]);
-  
+  // Initial query to Active Directory
   const handleSearch = async () => {
     setLoading(true);
     setError(null);
+    setInitialLoad(false);
     
     try {
       const response = await apiService.queryAD({
         filter: filter,
         query: searchQuery,
         attributes: availableAttributes,
+        ou_paths: ouPaths.length > 0 ? ouPaths : undefined,
+        page_size: pageSize
       });
       
-      // Process the results to match our component's expected format
-      const processedResults = response.results.map((item, index) => ({
-        id: `${filter}-${index}`,
-        ...item,
-        // Ensure consistent property naming
-        name: item.Name || item.name,
-        operatingSystem: item.OperatingSystem || item.operatingSystem,
-        lastLogon: item.LastLogonDate || item.lastLogon,
-        ipAddress: item.IPv4Address || item.ipAddress,
-        ou: item.DistinguishedName || item.ou,
-        isEnabled: item.Enabled !== undefined ? item.Enabled : item.isEnabled,
-        managedBy: item.ManagedBy || item.managedBy,
-        description: item.Description || item.description
-      }));
+      // Update results state
+      setResults(response.results);
+      setTotalResults(response.total_count);
+      setCurrentPage(response.current_page);
+      setTotalPages(response.total_pages);
+      setHasNextPage(response.has_next_page);
+      setSessionId(response.session_id);
+      setIsCountExact(response.is_count_exact);
       
-      setResults(processedResults);
-      setTotalResults(response.totalCount);
-      setCurrentPage(1);
+      // Reset selections
+      setSelectedItems({});
+      setSelectAll(false);
     } catch (error) {
       console.error("Error querying Active Directory:", error);
       setError(apiService.formatErrorMessage(error));
@@ -101,30 +109,183 @@ const ActiveDirectoryQuery = () => {
     }
   };
   
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      handleSearch();
+  // Fetch a specific page
+  const fetchPage = async (pageNumber) => {
+    if (!sessionId) return;
+    
+    setLoading(true);
+    try {
+      const response = await apiService.getPage(sessionId, pageNumber);
+      
+      setResults(response.results);
+      setCurrentPage(response.current_page);
+      setTotalPages(response.total_pages);
+      setHasNextPage(response.has_next_page);
+      
+      // Maintain selected items across pages
+      const newSelectedItems = { ...selectedItems };
+      if (selectAll) {
+        // If selectAll is true, add all items on this page
+        response.results.forEach(item => {
+          const itemId = getItemId(item);
+          newSelectedItems[itemId] = true;
+        });
+        setSelectedItems(newSelectedItems);
+      }
+      
+      window.scrollTo(0, 0); // Scroll to top when changing pages
+    } catch (error) {
+      setError(apiService.formatErrorMessage(error));
+    } finally {
+      setLoading(false);
     }
   };
   
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
+  // Fetch all results
+  const fetchAllResults = async () => {
+    if (!sessionId) return;
+    
+    setLoadingAllResults(true);
+    setAllResultsProgress(0);
+    
+    try {
+      const response = await apiService.getAllResults(sessionId);
+      
+      // Update with all results
+      setResults(response.results);
+      setTotalResults(response.total_count);
+      setCurrentPage(1);
+      setTotalPages(Math.ceil(response.results.length / pageSize));
+      setHasNextPage(false);
+      
+      // Set progress to complete
+      setAllResultsProgress(100);
+      
+      // Update selection state
+      if (selectAll) {
+        const newSelectedItems = {};
+        response.results.forEach(item => {
+          const itemId = getItemId(item);
+          newSelectedItems[itemId] = true;
+        });
+        setSelectedItems(newSelectedItems);
+      }
+    } catch (error) {
+      setError(apiService.formatErrorMessage(error));
+    } finally {
+      setLoadingAllResults(false);
+    }
   };
   
+  // Export results
+  const handleExport = async (format = 'csv') => {
+    if (!sessionId) return;
+    
+    try {
+      setLoading(true);
+      
+      // Get selected item IDs if any are selected
+      const hasSelections = Object.keys(selectedItems).length > 0;
+      const selectedIds = hasSelections ? Object.keys(selectedItems).filter(id => selectedItems[id]) : [];
+      
+      const downloadUrl = await apiService.exportResults({
+        session_id: sessionId,
+        format: format,
+        selected_only: hasSelections,
+        selected_ids: selectedIds
+      });
+      
+      // Trigger download (in a real implementation)
+      // window.location.href = downloadUrl;
+      
+      // For now, just show a message
+      alert(`Export successful! (This is a placeholder - actual file download would happen here)`);
+    } catch (error) {
+      setError(apiService.formatErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Handle key press events
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      if (showOuInput && newOuPath) {
+        addOuPath();
+      } else {
+        handleSearch();
+      }
+    }
+  };
+  
+  // Show details modal for an item
   const viewDetails = (item) => {
     setDetailView(item);
   };
   
+  // Close details modal
   const closeDetails = () => {
     setDetailView(null);
   };
   
+  // Toggle column selection
   const toggleColumnSelection = (column) => {
     if (selectedColumns.includes(column)) {
       setSelectedColumns(selectedColumns.filter(col => col !== column));
     } else {
       setSelectedColumns([...selectedColumns, column]);
     }
+  };
+  
+  // Handle OU paths
+  const addOuPath = () => {
+    if (newOuPath.trim()) {
+      setOuPaths([...ouPaths, newOuPath.trim()]);
+      setNewOuPath("");
+      setShowOuInput(false);
+    }
+  };
+  
+  const removeOuPath = (index) => {
+    const updatedPaths = [...ouPaths];
+    updatedPaths.splice(index, 1);
+    setOuPaths(updatedPaths);
+  };
+  
+  // Handle item selection
+  const toggleItemSelection = (item) => {
+    const itemId = getItemId(item);
+    setSelectedItems({
+      ...selectedItems,
+      [itemId]: !selectedItems[itemId]
+    });
+    
+    // Update selectAll state
+    const newSelectedState = !selectedItems[itemId];
+    const allSelected = results.every(result => 
+      selectedItems[getItemId(result)] || (getItemId(result) === itemId && newSelectedState)
+    );
+    setSelectAll(allSelected);
+  };
+  
+  // Toggle select all items
+  const toggleSelectAll = () => {
+    const newSelectAll = !selectAll;
+    setSelectAll(newSelectAll);
+    
+    const newSelectedItems = { ...selectedItems };
+    results.forEach(item => {
+      const itemId = getItemId(item);
+      newSelectedItems[itemId] = newSelectAll;
+    });
+    setSelectedItems(newSelectedItems);
+  };
+  
+  // Generate a unique ID for an item
+  const getItemId = (item) => {
+    const name = item.Name || item.name;
+    const distinguishedName = item.DistinguishedName || item.distinguishedName;
+    return distinguishedName || `${filter}-${name}-${Math.random().toString(36).substr(2, 9)}`;
   };
   
   // Format a value from AD for display
@@ -160,11 +321,10 @@ const ActiveDirectoryQuery = () => {
     return foundKey ? obj[foundKey] : null;
   };
   
-  // Calculate pagination
-  const totalPages = Math.ceil(results.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, results.length);
-  const currentPageData = results.slice(startIndex, endIndex);
+  // Get count of selected items
+  const getSelectedCount = () => {
+    return Object.values(selectedItems).filter(Boolean).length;
+  };
   
   return (
     <div className="ad-query-container">
@@ -221,8 +381,95 @@ const ActiveDirectoryQuery = () => {
               </button>
             </div>
           </div>
+          
+          <div className="form-group">
+            <label className="form-label">
+              Page Size
+            </label>
+            <select
+              className="form-select"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              disabled={loading}
+            >
+              <option value={10}>10 per page</option>
+              <option value={25}>25 per page</option>
+              <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+            </select>
+          </div>
         </div>
         
+        {/* OU Paths Section */}
+        <div className="ou-paths-section">
+          <div className="ou-header">
+            <label className="form-label">
+              Organizational Units (Optional)
+            </label>
+            <button 
+              className="add-ou-button"
+              onClick={() => setShowOuInput(true)}
+              disabled={loading || showOuInput}
+            >
+              <Plus size={16} />
+              Add OU
+            </button>
+          </div>
+          
+          <div className="ou-paths-list">
+            {ouPaths.map((path, index) => (
+              <div key={index} className="ou-path-item">
+                <span className="ou-path-text">{path}</span>
+                <button 
+                  className="remove-ou-button"
+                  onClick={() => removeOuPath(index)}
+                  disabled={loading}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+            
+            {showOuInput && (
+              <div className="ou-input-container">
+                <input
+                  type="text"
+                  className="ou-input"
+                  placeholder="e.g. OU=Computers,DC=example,DC=com"
+                  value={newOuPath}
+                  onChange={(e) => setNewOuPath(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  autoFocus
+                />
+                <div className="ou-input-buttons">
+                  <button 
+                    className="add-button"
+                    onClick={addOuPath}
+                  >
+                    Add
+                  </button>
+                  <button 
+                    className="cancel-button"
+                    onClick={() => {
+                      setNewOuPath("");
+                      setShowOuInput(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {ouPaths.length === 0 && !showOuInput && (
+              <div className="no-ou-message">
+                No OUs specified. Query will search the entire directory.
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Column Selection */}
         {availableAttributes.length > 0 && (
           <div className="column-selection">
             <label className="form-label">
@@ -248,6 +495,7 @@ const ActiveDirectoryQuery = () => {
           </div>
         )}
         
+        {/* Search Button */}
         <button
           className="search-button primary"
           onClick={handleSearch}
@@ -265,41 +513,159 @@ const ActiveDirectoryQuery = () => {
       
       {/* Results Section */}
       <div className="results-section">
-        <h2 className="section-title">Results ({results.length} items)</h2>
+        <div className="results-header">
+          <h2 className="section-title">
+            Results 
+            <span className="result-count">
+              ({totalResults} {!isCountExact && '≈'} items)
+            </span>
+          </h2>
+          
+          {sessionId && results.length > 0 && (
+            <div className="results-actions">
+              <div className="selection-info">
+                {getSelectedCount() > 0 && (
+                  <span className="selected-count">
+                    {getSelectedCount()} selected
+                  </span>
+                )}
+              </div>
+              
+              <div className="action-buttons">
+                {!loadingAllResults && totalResults > results.length && (
+                  <button 
+                    className="action-button"
+                    onClick={fetchAllResults}
+                    disabled={loading}
+                    title="Load all results"
+                  >
+                    <Database size={16} />
+                    <span>Load All</span>
+                  </button>
+                )}
+                
+                <button 
+                  className="action-button"
+                  onClick={() => handleExport('csv')}
+                  disabled={loading || loadingAllResults}
+                  title="Export as CSV"
+                >
+                  <Download size={16} />
+                  <span>Export CSV</span>
+                </button>
+                
+                <button 
+                  className="action-button"
+                  onClick={() => handleExport('json')}
+                  disabled={loading || loadingAllResults}
+                  title="Export as JSON"
+                >
+                  <Save size={16} />
+                  <span>Export JSON</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         
+        {/* Loading all results progress */}
+        {loadingAllResults && (
+          <div className="loading-progress">
+            <div className="progress-text">
+              Loading all results... ({allResultsProgress}%)
+            </div>
+            <div className="progress-bar-container">
+              <div 
+                className="progress-bar" 
+                style={{ width: `${allResultsProgress}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+        
+        {/* Results Table */}
         {results.length > 0 ? (
           <div className="table-container">
             <table className="results-table">
               <thead>
                 <tr>
+                  <th className="table-header checkbox-column">
+                    <div className="checkbox-wrapper">
+                      <button 
+                        className="select-all-button"
+                        onClick={toggleSelectAll}
+                        title={selectAll ? "Deselect all" : "Select all"}
+                      >
+                        {selectAll ? <CheckSquare size={18} /> : <Square size={18} />}
+                      </button>
+                    </div>
+                  </th>
                   {selectedColumns.map(column => (
                     <th key={column} className="table-header">
                       {column}
                     </th>
                   ))}
-                  <th className="table-header">Actions</th>
+                  <th className="table-header actions-column">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {currentPageData.map((item) => (
-                  <tr key={item.id} className="table-row">
-                    {selectedColumns.map(column => (
-                      <td key={`${item.id}-${column}`} className="table-cell">
-                        {formatValue(column, getPropertyValue(item, column))}
+                {results.map((item) => {
+                  const itemId = getItemId(item);
+                  const isSelected = selectedItems[itemId] === true;
+                  
+                  return (
+                    <tr key={itemId} className={`table-row ${isSelected ? 'selected' : ''}`}>
+                      <td className="table-cell checkbox-column">
+                        <div className="checkbox-wrapper">
+                          <button 
+                            className="select-item-button"
+                            onClick={() => toggleItemSelection(item)}
+                            title={isSelected ? "Deselect" : "Select"}
+                          >
+                            {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
+                          </button>
+                        </div>
                       </td>
-                    ))}
-                    <td className="table-cell">
-                      <button
-                        className="view-details-button"
-                        onClick={() => viewDetails(item)}
-                      >
-                        View Details
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      {selectedColumns.map(column => (
+                        <td 
+                          key={`${itemId}-${column}`} 
+                          className="table-cell"
+                          title={formatValue(column, getPropertyValue(item, column))}
+                        >
+                          {formatValue(column, getPropertyValue(item, column))}
+                        </td>
+                      ))}
+                      <td className="table-cell actions-column">
+                        <button
+                          className="view-details-button"
+                          onClick={() => viewDetails(item)}
+                        >
+                          View Details
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+        ) : !loading && initialLoad ? (
+          <div className="initial-message">
+            <div className="initial-message-icon">🔍</div>
+            <h3 className="initial-message-title">Welcome to Active Directory Query Tool</h3>
+            <p className="initial-message-text">
+              Enter a search term above to find objects in your Active Directory.
+              <br />You can also specify one or more Organizational Units to narrow your search.
+            </p>
+            <button
+              className="search-button primary"
+              onClick={() => {
+                setInitialLoad(false);
+                handleSearch();
+              }}
+            >
+              Show All {filter} (Limited to 50)
+            </button>
           </div>
         ) : !loading && (
           <div className="no-results">
@@ -308,37 +674,80 @@ const ActiveDirectoryQuery = () => {
         )}
         
         {/* Pagination Controls */}
-        {totalPages > 1 && (
+        {!initialLoad && totalPages > 1 && (
           <div className="pagination">
+            <div className="pagination-info">
+              Showing page {currentPage} of {totalPages}
+            </div>
             <nav className="pagination-nav">
               <button
                 className="pagination-button"
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
+                onClick={() => fetchPage(1)}
+                disabled={loading || currentPage === 1}
+                title="First page"
               >
-                &laquo; Prev
+                <span className="sr-only">First</span>
+                «
               </button>
-              
-              {[...Array(totalPages)].map((_, i) => (
-                <button
-                  key={i + 1}
-                  className={`pagination-button ${
-                    currentPage === i + 1
-                    ? 'active'
-                    : ''
-                  }`}
-                  onClick={() => handlePageChange(i + 1)}
-                >
-                  {i + 1}
-                </button>
-              ))}
               
               <button
                 className="pagination-button"
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
+                onClick={() => fetchPage(currentPage - 1)}
+                disabled={loading || currentPage === 1}
+                title="Previous page"
               >
-                Next &raquo;
+                <ArrowLeft size={16} />
+                <span className="sr-only">Previous</span>
+              </button>
+              
+              {/* Page number buttons - show a window around current page */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(page => 
+                  page === 1 || 
+                  page === totalPages || 
+                  Math.abs(page - currentPage) <= 2
+                )
+                .map((page, index, array) => {
+                  // Add ellipsis when there are gaps
+                  const prevPage = array[index - 1];
+                  const showEllipsisBefore = prevPage && page - prevPage > 1;
+                  
+                  return (
+                    <React.Fragment key={page}>
+                      {showEllipsisBefore && (
+                        <span className="pagination-ellipsis">…</span>
+                      )}
+                      <button
+                        className={`pagination-button ${
+                          currentPage === page ? 'active' : ''
+                        }`}
+                        onClick={() => fetchPage(page)}
+                        disabled={loading || currentPage === page}
+                      >
+                        {page}
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              
+              <button
+                className="pagination-button"
+                onClick={() => fetchPage(currentPage + 1)}
+                disabled={loading || !hasNextPage}
+                title="Next page"
+              >
+                <ArrowRight size={16} />
+                <span className="sr-only">Next</span>
+              </button>
+              
+              <button
+                className="pagination-button"
+                onClick={() => fetchPage(totalPages)}
+                disabled={loading || currentPage === totalPages}
+                title="Last page"
+              >
+                <span className="sr-only">Last</span>
+                »
               </button>
             </nav>
           </div>
@@ -351,7 +760,9 @@ const ActiveDirectoryQuery = () => {
           <div className="modal-container">
             <div className="modal-content">
               <div className="modal-header">
-                <h3 className="modal-title">Details: {detailView.Name || detailView.name}</h3>
+                <h3 className="modal-title">
+                  Details: {detailView.Name || detailView.name || 'Object'}
+                </h3>
                 <button 
                   className="close-button"
                   onClick={closeDetails}
@@ -363,14 +774,16 @@ const ActiveDirectoryQuery = () => {
               <div className="property-grid">
                 <h4 className="section-subtitle">All Properties</h4>
                 <div className="properties-container">
-                  {Object.entries(detailView).filter(([key]) => key !== 'id').map(([key, value]) => (
-                    <div key={key} className="property-item">
-                      <div className="property-label">{key}:</div>
-                      <div className="property-value">
-                        {formatValue(key, value)}
+                  {Object.entries(detailView)
+                    .filter(([key]) => key !== 'id')
+                    .map(([key, value]) => (
+                      <div key={key} className="property-item">
+                        <div className="property-label">{key}:</div>
+                        <div className="property-value">
+                          {formatValue(key, value)}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
               

@@ -3,7 +3,8 @@ import React from 'react';
 import './App.css';
 import AppSelectorCarousel from './components/AppSelectorCarousel/AppSelectorCarousel';
 import TeamsHub from './components/TeamsHub/TeamsHub.jsx';
-import ActiveDirectoryQuery from './components/ActiveDirectoryQuery/ActiveDirectoryQuery.jsx';
+import UserProfile from './components/TestComponents/TestComponents.jsx';
+
 import LoginComponent, { AuthProvider, useAuth } from './components/LoginComponent/LoginComponent';
 import { UserCircle, LogOut } from 'lucide-react';
 
@@ -19,17 +20,18 @@ const AuthenticatedApp = () => {
       icon: '👥'
     },
     { 
-      name: 'AD Viewer', 
-      component: <ActiveDirectoryQuery />,
-      icon: '🔍' 
+      name: 'Saas', 
+      component: <UserProfile />,
+      icon: '👥'
     },
+
     // Add more demos here
   ];
 
   // If not authenticated, show login screen
-  if (!currentUser) {
-    return <LoginComponent />;
-  }
+  // if (!currentUser) {
+  //   return <LoginComponent />;
+  // }
 
   // Show the app with authenticated user info
   return (
@@ -41,8 +43,8 @@ const AuthenticatedApp = () => {
             <UserCircle size={20} />
           </div>
           <div className="auth-user-details">
-            <div className="auth-user-name">{currentUser.username}</div>
-            <div className="auth-user-domain">{currentUser.domain}</div>
+            <div className="auth-user-name">{currentUser?.username || "admin"}</div>
+            <div className="auth-user-domain">{currentUser?.domain || "admin"}</div>
           </div>
         </div>
         <button className="auth-logout-button" onClick={signOut}>

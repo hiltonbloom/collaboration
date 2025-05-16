@@ -17,12 +17,6 @@ const encryptData = (data) => {
     return CryptoJS.AES.encrypt(data, ENCRYPTION_KEY).toString();
 };
 
-// Helper for decrypting data
-const decryptData = (encryptedData) => {
-    const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
-    return bytes.toString(CryptoJS.enc.Utf8);
-};
-
 // Auth Provider component to wrap the application
 export const AuthProvider = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -65,7 +59,7 @@ export const AuthProvider = ({ children }) => {
 
     const login = async (username, password, domain) => {
         try {
-            const response = await fetch('http://localhost:8000/api/auth/verify', {
+            const response = await fetch('http://localhost:2222/api/auth/verify', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -112,7 +106,7 @@ export const AuthProvider = ({ children }) => {
     const logout = async () => {
         try {
             // Call logout endpoint
-            await fetch('http://localhost:8000/api/auth/logout', {
+            await fetch('http://localhost:2222/api/auth/logout', {
                 method: 'POST',
                 headers: getAuthHeader()
             });
@@ -201,7 +195,7 @@ export const AuthProvider = ({ children }) => {
 
     const refreshSession = async () => {
         try {
-            const response = await fetch('http://localhost:8000/api/auth/refresh', {
+            const response = await fetch('http://localhost:2222/api/auth/refresh', {
                 method: 'POST',
                 headers: {
                     ...getAuthHeader(),
